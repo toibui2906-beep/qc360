@@ -1,6 +1,8 @@
+import criteriaConfig from '@/config/criteria.json'; // 1. Import file config hệ số
+
 export interface SurveyRow {
   ID?: number;
-  [key: string]: unknown;
+  [key: string]: any;
 }
 
 export interface UserSummary {
@@ -25,18 +27,12 @@ export const TRUST_LEVELS = {
   NO_TRUST: 'Không tín nhiệm',
 } as const;
 
-/**
- * Xử lý và phân tích dữ liệu khảo sát 360 độ
- * @param rawData Dữ liệu thô đọc từ Excel
- * @param sortBy 'trust' (Sắp xếp theo % Tín nhiệm) | 'avg' (Sắp xếp theo Điểm TB KPI)
- */
 export function processSurveyData(
   rawData: SurveyRow[],
   sortBy: 'trust' | 'avg' = 'trust'
 ): UserSummary[] {
   if (!rawData || rawData.length === 0) return [];
 
-  // 1. Tự động nhận diện tên cột Họ tên và Mức độ tín nhiệm
   const firstRow = rawData[0];
   const keys = Object.keys(firstRow);
 
@@ -47,7 +43,6 @@ export function processSurveyData(
     k.trim().toLowerCase().includes('mức độ tín nhiệm')
   );
 
-  // 2. Nhóm dữ liệu theo Tên cán bộ y tế
   const grouped = new Map<string, SurveyRow[]>();
 
   rawData.forEach((row) => {
@@ -62,10 +57,12 @@ export function processSurveyData(
 
   const summaryList: UserSummary[] = [];
 
-  // 3. Tính toán tổng hợp cho từng cá nhân
+  // Ép kiểu config hệ số
+  const weights = criteriaConfig as Record<string, number>;
+
   grouped.forEach((votes, fullName) => {
     const totalVotes = votes.length;
-    let sumTotalScores = 0;
+    let sumWeightedScores = 0; // Tổng điểm đã nhân hệ số
     let highTrustCount = 0;
     let trustCount = 0;
     let mediumTrustCount = 0;
@@ -73,19 +70,31 @@ export function processSurveyData(
     let noTrustCount = 0;
 
     votes.forEach((vote) => {
-      // Tính tổng điểm các tiêu chí TC
+      let voteWeightedSum = 0;
+      let voteTotalWeight = 0;
+
+      // Duyệt qua các tiêu chí (TC1, TC2,...)
       Object.keys(vote).forEach((key) => {
-        if (key.toUpperCase().startsWith('TC')) {
-          const score = parseFloat(String(vote[key]));
+        const trimmedKey = key.trim().toUpperCase();
+        if (trimmedKey.startsWith('TC')) {
+          const score = parseFloat(vote[key]);
           if (!isNaN(score)) {
-            sumTotalScores += score;
+            // Lấy hệ số từ file config (mặc định là 1 nếu không có trong config)
+            const weight = weights[trimmedKey] ?? 1;
+            
+            voteWeightedSum += score * weight;
+            voteTotalWeight += weight;
           }
         }
       });
 
-      // Lấy mức độ tín nhiệm
-      const rawLevel = trustKey ? vote[trustKey]?.toString().trim() : '';
+      // Điểm trung bình có trọng số cho 1 phiếu khảo sát
+      if (voteTotalWeight > 0) {
+        sumWeightedScores += voteWeightedSum / voteTotalWeight;
+      }
 
+      // Đếm số lượng phiếu tín nhiệm
+      const rawLevel = trustKey ? vote[trustKey]?.toString().trim() : '';
       if (rawLevel === TRUST_LEVELS.HIGH) highTrustCount++;
       else if (rawLevel === TRUST_LEVELS.TRUSTED) trustCount++;
       else if (rawLevel === TRUST_LEVELS.MEDIUM) mediumTrustCount++;
@@ -93,22 +102,23 @@ export function processSurveyData(
       else if (rawLevel === TRUST_LEVELS.NO_TRUST) noTrustCount++;
     });
 
-    const avgTotalScore = totalVotes > 0 ? sumTotalScores / totalVotes : 0;
+    // Điểm Trung Bình Tổng của tất cả các phiếu
+    const avgTotalScore = totalVotes > 0 ? sumWeightedScores / totalVotes : 0;
 
-    // Công thức tính Mức độ tín nhiệm (%)
+    // Tính % Tín nhiệm
     const scoreNumerator =
       highTrustCount + trustCount - (lowTrustCount + 2 * noTrustCount);
     const trustScorePercent =
       totalVotes > 0 ? (scoreNumerator / totalVotes) * 100 : 0;
 
-    // Phân loại xếp loại năng lực
+    // Phân loại
     let classification = 'Trung bình';
     if (trustScorePercent >= 80) classification = 'Tín nhiệm cao';
     else if (trustScorePercent >= 50) classification = 'Tín nhiệm';
     else if (trustScorePercent < 0) classification = 'Không tín nhiệm';
 
     summaryList.push({
-      stt: 0, // Sẽ gán lại sau khi xếp hạng
+      stt: 0,
       fullName,
       totalVotes,
       avgTotalScore: Math.round(avgTotalScore * 100) / 100,
@@ -122,16 +132,14 @@ export function processSurveyData(
     });
   });
 
-  // 4. Sắp xếp danh sách theo Option được chọn
+  // Sắp xếp theo Option
   summaryList.sort((a, b) => {
     if (sortBy === 'trust') {
-      // Option 1: Ưu tiên % Tín nhiệm -> Trùng thì xét Điểm TB
       if (b.trustScorePercent !== a.trustScorePercent) {
         return b.trustScorePercent - a.trustScorePercent;
       }
       return b.avgTotalScore - a.avgTotalScore;
     } else {
-      // Option 2: Ưu tiên Điểm TB (KPI) -> Trùng thì xét % Tín nhiệm
       if (b.avgTotalScore !== a.avgTotalScore) {
         return b.avgTotalScore - a.avgTotalScore;
       }
@@ -139,7 +147,6 @@ export function processSurveyData(
     }
   });
 
-  // 5. Đánh lại STT/Hạng chuẩn từ 1 đến hết theo danh sách đã xếp hạng
   return summaryList.map((item, index) => ({
     ...item,
     stt: index + 1,

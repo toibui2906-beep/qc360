@@ -248,8 +248,8 @@ export default function Home() {
           <div className="flex items-center space-x-3 bg-white/10 backdrop-blur-md border border-white/10 p-4 rounded-2xl shrink-0">
             <Building2 className="w-10 h-10 text-emerald-400" />
             <div>
-              <p className="text-xs text-slate-300 font-medium">Đơn vị ứng dụng</p>
-              <p className="text-sm font-bold text-white">Khoa Cấp Cứu - Bệnh Viện Đa Khoa</p>
+              <p className="text-xs text-slate-300 font-medium">Khoa phòng</p>
+              <p className="text-sm font-bold text-white">Khoa Cấp Cứu - Bệnh Viện ĐKQT Vinmec TimesCity</p>
             </div>
           </div>
         </div>
